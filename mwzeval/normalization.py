@@ -137,6 +137,10 @@ def normalize_state_slot_value(slot_name, value):
                 return "arbury lodge guesthouse"
             elif name == "nandos in the city centre":
                 return "nandos city centre"
+            elif name == "a and b guest house":
+                return "a and b guesthouse"
+            elif name == "acorn guesthouse:
+                return "acorn guest house"
 
         if domain is None or domain == "attraction":
             if name == "broughton gallery":
