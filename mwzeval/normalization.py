@@ -87,7 +87,9 @@ def normalize_state_slot_value(slot_name, value):
         name = name.replace(" & ", " and ")
         name = name.replace("&", " and ")
         name = name.replace(" '", "'")
-
+        
+        name = name.replace("bed and breakfast","b and b")
+        
         if domain is None or domain == "restaurant":
             if name == "hotel du vin bistro":
                 return "hotel du vin and bistro"
