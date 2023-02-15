@@ -1,6 +1,10 @@
 import os
 import json
 import urllib.request
+from typing import Literal
+import zipfile
+import io
+from collections import defaultdict
 
 from mwzeval.normalization import normalize_data
 
@@ -102,13 +106,18 @@ def load_multiwoz22_reference():
     return references
 
 
-def load_gold_states():
+def load_gold_states(mwz_version: Literal['22', '24'] = '22'):
     dir_path = os.path.dirname(os.path.realpath(__file__))
     data_path = os.path.join(dir_path, "data", "gold_states.json")
     if os.path.exists(data_path):
         with open(data_path) as f:
             return json.load(f)
-    _, states = load_multiwoz22()
+    if mwz_version == "22":
+        _, states = load_multiwoz22()
+    elif mwz_version == "24":
+        _, states = load_multiwoz24()
+    else:
+        raise ValueError("Unsupported MultiWOZ version.")
     return states
 
     
@@ -187,6 +196,98 @@ def load_multiwoz22():
 
     with open(reference_path, 'w+') as f:
         json.dump(references, f, indent=2)
+
+    with open(state_path, 'w+') as f:
+        json.dump(states, f, indent=2)
+
+    return references, states
+
+
+def load_multiwoz24():
+    def is_filled(slot_value: str) -> bool:
+        """Whether a slot value is filled."""
+        slot_value = slot_value.lower()
+        return slot_value and slot_value != "not mentioned" and slot_value != "none"
+
+    def parse_state(turn: dict, prepend_book: bool = False) -> dict[dict[str, str]]:
+        """Get the slot values of a given turn.
+
+        This function is adapted from
+        google-research/schema_guided_dst/multiwoz/create_data_from_multiwoz.py
+
+        If a slot has multiple values (which are separated by '|'), only the first one is taken.
+        This is consistant with the approach taken for MultiWOZ 2.2 evaluation.
+
+        Args:
+            turn: Dictionary of a turn of the MultiWOZ 2.4 dataset
+            prepend_book: Whether to prepend the string 'book' to slot names for booking slots
+
+        Returns:
+            {$domain: {$slot_name: $value, ...}, ...}
+        """
+        dialog_states = defaultdict(dict)
+        for domain_name, values in turn['metadata'].items():
+            dialog_states_of_one_domain = {}
+
+            for k, v in values["book"].items():
+                # Note: "booked" is not really a state, just booking confirmation
+                if k == 'booked':
+                    continue
+                if isinstance(v, list):
+                    for item_dict in v:
+                        new_states = {
+                            (f"book{slot_name}" if prepend_book else slot_name): slot_val
+                            for slot_name, slot_val in item_dict.items()
+                        }
+                        dialog_states_of_one_domain.update(new_states)
+                if isinstance(v, str) and v:
+                    slot_name = f"book{k}" if prepend_book else k
+                    dialog_states_of_one_domain[slot_name] = v
+
+            new_states = values["semi"]
+            dialog_states_of_one_domain.update(new_states)
+
+            dialog_states_of_one_domain = {
+                slot_name: value.split('|')[0]  # use the first value
+                for slot_name, value in dialog_states_of_one_domain.items()
+                if is_filled(value)
+            }
+            if len(dialog_states_of_one_domain) > 0:
+                dialog_states[domain_name] = dialog_states_of_one_domain
+
+        return dialog_states
+
+    with urllib.request.urlopen(
+        "https://github.com/smartyfh/MultiWOZ2.4/blob/main/data/MULTIWOZ2.4.zip?raw=true"
+    ) as url:
+        print("Downloading MultiWOZ_2.4")
+        unzipped = zipfile.ZipFile(io.BytesIO(url.read()))
+        # dialogue_acts = json.loads(unzipped.read('MULTIWOZ2.4/dialogue_acts.json'))
+        data = json.loads(unzipped.read('MULTIWOZ2.4/data.json'))
+
+    mwz24_data = {}
+    for dialogue_id, dialogue in data.items():
+        parsed_turns = []
+        for i, turn in enumerate(dialogue["log"]):
+            if i % 2 == 0:
+                continue
+            state = parse_state(turn)
+            parsed_turns.append({"response": "", "state": state})
+        mwz24_data[dialogue_id.split(".")[0].lower()] = parsed_turns
+
+    normalize_data(mwz24_data)
+
+    references, states = {}, {}
+    for dialog in mwz24_data:
+        #  references[dialog] = [x["response"] for x in mwz24_data[dialog]]
+        states[dialog] = [x["state"] for x in mwz24_data[dialog]]
+
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    #  reference_path = os.path.join(dir_path, "data", "references", "mwz24.json")
+    state_path = os.path.join(dir_path, "data", "gold_states.json")
+
+    #  with open(reference_path, 'w+') as f:
+        #  json.dump(references, f, indent=2)
 
     with open(state_path, 'w+') as f:
         json.dump(states, f, indent=2)

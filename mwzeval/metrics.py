@@ -16,6 +16,7 @@ from mwzeval.utils import load_goals, load_booked_domains, load_gold_states
 
 
 class Evaluator:
+    _MWZ_VERSION = '22'
 
     def __init__(self, bleu : bool, success : bool, richness : bool, dst : bool = False):
         self.bleu = bleu
@@ -32,7 +33,7 @@ class Evaluator:
             self.booked_domains = load_booked_domains()
 
         if dst:
-            self.gold_states = load_gold_states() 
+            self.gold_states = load_gold_states(mwz_version=self._MWZ_VERSION) 
 
     def evaluate(self, input_data):
         normalize_data(input_data)
@@ -42,6 +43,15 @@ class Evaluator:
             "richness" : get_richness(input_data)                                                 if self.richness else None,
             "dst"      : get_dst(input_data, self.gold_states)                                    if self.dst else None,
         }
+    
+
+class Multiwoz24Evaluator(Evaluator):
+    _MWZ_VERSION = '24'
+
+    def __init__(self, bleu: bool, success: bool, richness: bool, dst: bool = False):
+        if bleu or success or richness:
+            raise NotImplementedError("bleu, success or richness metrics are not yet implemented for MultiWOZ 2.4.")
+        super().__init__(bleu=bleu, success=success, richness=richness, dst=dst)
 
 
 def get_bleu(input_data, reference_dialogs):
