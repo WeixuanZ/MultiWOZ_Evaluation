@@ -209,25 +209,38 @@ def load_multiwoz24():
         slot_value = slot_value.lower()
         return slot_value and slot_value != "not mentioned" and slot_value != "none"
 
+    def get_first_value(values: str) -> str:
+        """Get the first value if the values string contains multiple."""
+        if "|" in values:
+            values = values.split("|")
+        elif ">" in values:
+            values = values.split(">")
+        elif "<" in values:
+            values = values.split("<")
+        else:
+            values = [values]
+        return values[0]
+
     def parse_state(turn: dict, prepend_book: bool = False) -> dict[dict[str, str]]:
         """Get the slot values of a given turn.
 
         This function is adapted from
         google-research/schema_guided_dst/multiwoz/create_data_from_multiwoz.py
 
-        If a slot has multiple values (which are separated by '|'), only the first one is taken.
+        If a slot has multiple values (which are separated by '|', '<' or '>'), only the first one is taken.
         This is consistant with the approach taken for MultiWOZ 2.2 evaluation.
 
         Args:
             turn: Dictionary of a turn of the MultiWOZ 2.4 dataset
-            prepend_book: Whether to prepend the string 'book' to slot names for booking slots
+            prepend_book: Whether to prepend the string 'book' to slot names for booking slots.
+                MultiWOZ 2.2 has the 'book' prefix.
 
         Returns:
             {$domain: {$slot_name: $value, ...}, ...}
         """
         dialog_states = defaultdict(dict)
         for domain_name, values in turn['metadata'].items():
-            dialog_states_of_one_domain = {}
+            domain_dial_state = {}
 
             for k, v in values["book"].items():
                 # Note: "booked" is not really a state, just booking confirmation
@@ -237,23 +250,22 @@ def load_multiwoz24():
                     for item_dict in v:
                         new_states = {
                             (f"book{slot_name}" if prepend_book else slot_name): slot_val
-                            for slot_name, slot_val in item_dict.items()
-                        }
-                        dialog_states_of_one_domain.update(new_states)
+                            for slot_name, slot_val in item_dict.items()                        }
+                        domain_dial_state.update(new_states)
                 if isinstance(v, str) and v:
                     slot_name = f"book{k}" if prepend_book else k
-                    dialog_states_of_one_domain[slot_name] = v
+                    domain_dial_state[slot_name] = v
 
             new_states = values["semi"]
-            dialog_states_of_one_domain.update(new_states)
+            domain_dial_state.update(new_states)
 
-            dialog_states_of_one_domain = {
-                slot_name: value.split('|')[0]  # use the first value
-                for slot_name, value in dialog_states_of_one_domain.items()
+            domain_dial_state = {
+                slot_name: get_first_value(value)  # use the first value
+                for slot_name, value in domain_dial_state.items()
                 if is_filled(value)
             }
-            if len(dialog_states_of_one_domain) > 0:
-                dialog_states[domain_name] = dialog_states_of_one_domain
+            if len(domain_dial_state) > 0:
+                dialog_states[domain_name] = domain_dial_state
 
         return dialog_states
 
