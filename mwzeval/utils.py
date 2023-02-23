@@ -205,7 +205,10 @@ def load_multiwoz22():
 
 def load_multiwoz24():
     def is_filled(slot_value: str) -> bool:
-        """Whether a slot value is filled."""
+        """Whether a slot value is filled.
+
+        Unfilled slots should be dropped, as in MultiWOZ 2.2.
+        """
         slot_value = slot_value.lower()
         return slot_value and slot_value != "not mentioned" and slot_value != "none"
 
@@ -287,7 +290,7 @@ def load_multiwoz24():
             parsed_turns.append({"response": "", "state": state})
         mwz24_data[dialogue_id.split(".")[0].lower()] = parsed_turns
 
-    normalize_data(mwz24_data)
+    normalize_data(mwz24_data, extended=True)
 
     references, states = {}, {}
     for dialog in mwz24_data:

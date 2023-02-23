@@ -35,8 +35,13 @@ class Evaluator:
         if dst:
             self.gold_states = load_gold_states(mwz_version=self._MWZ_VERSION) 
 
-    def evaluate(self, input_data):
-        normalize_data(input_data)
+    def evaluate(self, input_data, use_extended_normalization=False):
+        """Get evaluations.
+
+        The use_extended_normalization flag enables a more thorough normalization.
+        Setting the flag to False ensures backwards compatibility.
+        """
+        normalize_data(input_data, extended=use_extended_normalization)
         return {
             "bleu"     : get_bleu(input_data, self.reference_dialogs)                             if self.bleu else None,
             "success"  : get_success(input_data, self.database, self.goals, self.booked_domains)  if self.success else None,
@@ -52,6 +57,9 @@ class Multiwoz24Evaluator(Evaluator):
         if bleu or success or richness:
             raise NotImplementedError("bleu, success or richness metrics are not yet implemented for MultiWOZ 2.4.")
         super().__init__(bleu=bleu, success=success, richness=richness, dst=dst)
+
+    def evaluate(self, input_data):
+        return super().evaluate(input_data, use_extended_normalization=True)
 
 
 def get_bleu(input_data, reference_dialogs):

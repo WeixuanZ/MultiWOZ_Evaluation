@@ -4,8 +4,12 @@ from functools import partial
 from sacremoses import MosesTokenizer, MosesDetokenizer
 
 
-def normalize_data(input_data):
-    """ In-place normalization of raw dictionary with input data. Normalize slot names, slot values, remove plurals and detokenize utterances. """
+def normalize_data(input_data, extended=False):
+    """ In-place normalization of raw dictionary with input data. Normalize slot names, slot values, remove plurals and detokenize utterances.
+
+    The extended flag is used for a more thorough normalization compared to MultiWOZ 2.2.
+    Setting the flag to False ensures backwards compatibility.
+    """
 
     mt, md = MosesTokenizer(lang='en'), MosesDetokenizer(lang='en')
     slot_name_re = re.compile(r'\[([\w\s\d]+)\](es|s|-s|-es|)')
@@ -25,7 +29,7 @@ def normalize_data(input_data):
                     slot = slot.lower().replace(' ', '')
                     if slot == "arriveby": slot = "arrive"
                     elif slot == "leaveat": slot = "leave"
-                    new_state[slot] =  normalize_state_slot_value(slot, value)
+                    new_state[slot] =  normalize_state_slot_value(slot, value, extended=extended)
                 turn["state"][domain] = new_state
     
 
@@ -61,12 +65,15 @@ def normalize_slot_name(slot_name):
     return reverse_slot_name_mapping[slot_name]
 
 
-def normalize_state_slot_value(slot_name, value):
+def normalize_state_slot_value(slot_name, value, extended=False):
     """ Normalize slot value:
         1) replace too distant venue names with canonical values
         2) replace too distant food types with canonical values
         3) parse time strings to the HH:MM format
         4) resolve inconsistency between the database entries and parking and internet slots
+
+    The extended flag is used for a more thorough normalization compared to MultiWOZ 2.2.
+    Setting the flag to False ensures backwards compatibility.
     """
     
     def type_to_canonical(type_string): 
@@ -78,7 +85,7 @@ def normalize_state_slot_value(slot_name, value):
             return "nightclub"
         elif type_string == "guest house":
             return "guesthouse"
-        elif type_string == "concert hall":
+        elif type_string == "concert hall" and extended:
             return "concerthall"
         return type_string
 
