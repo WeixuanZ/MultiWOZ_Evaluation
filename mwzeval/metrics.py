@@ -16,15 +16,27 @@ from mwzeval.utils import load_goals, load_booked_domains, load_gold_states
 
 
 class Evaluator:
+    _MWZ_VERSION = '22'
 
-    def __init__(self, bleu : bool, success : bool, richness : bool, dst : bool = False):
+    def __init__(self, bleu: bool, success: bool, richness: bool, dst: bool = False, enable_normalization: bool = True):
+        """Initialize the evaluator.
+
+        Args:
+            bleu (bool): Whether to include BLEU metric.
+            success (bool): Whether to include Inform & Success rates metrics.
+            richness (bool): Whether to include lexical richness metric.
+            dst (bool, optional): Whether to include DST metrics. Defaults to False.
+            enable_normalization (bool, optional): Whether to use slot name and value normalization. Defaults to True.
+        """
         self.bleu = bleu
         self.success = success
         self.richness = richness
         self.dst = dst
+        
+        self._enable_normalization = enable_normalization
 
         if bleu:
-            self.reference_dialogs = load_references()
+            self.reference_dialogs = load_references(enable_normalization=self._enable_normalization)
 
         if success:
             self.database = MultiWOZVenueDatabase()
@@ -32,16 +44,26 @@ class Evaluator:
             self.booked_domains = load_booked_domains()
 
         if dst:
-            self.gold_states = load_gold_states() 
+            self.gold_states = load_gold_states(mwz_version=self._MWZ_VERSION, enable_normalization=self._enable_normalization) 
 
     def evaluate(self, input_data):
-        normalize_data(input_data)
+        if self._enable_normalization:
+            normalize_data(input_data)
         return {
             "bleu"     : get_bleu(input_data, self.reference_dialogs)                             if self.bleu else None,
             "success"  : get_success(input_data, self.database, self.goals, self.booked_domains)  if self.success else None,
             "richness" : get_richness(input_data)                                                 if self.richness else None,
             "dst"      : get_dst(input_data, self.gold_states)                                    if self.dst else None,
         }
+    
+
+class Multiwoz24Evaluator(Evaluator):
+    _MWZ_VERSION = '24'
+
+    def __init__(self, bleu: bool, success: bool, richness: bool, dst: bool = False, enable_normalization: bool = True):
+        if bleu or success or richness:
+            raise NotImplementedError("bleu, success or richness metrics are not yet implemented for MultiWOZ 2.4.")
+        super().__init__(bleu=bleu, success=success, richness=richness, dst=dst, enable_normalization=enable_normalization)
 
 
 def get_bleu(input_data, reference_dialogs):
