@@ -83,7 +83,7 @@ def load_booked_domains():
         return json.load(f)
 
 
-def load_references(systems=['mwz22']): #, 'damd', 'uniconv', 'hdsa', 'lava', 'augpt']):
+def load_references(systems=['mwz22'], enable_normalization: bool = True): #, 'damd', 'uniconv', 'hdsa', 'lava', 'augpt']):
     references = {}
     for system in systems:
         if system == 'mwz22':
@@ -92,36 +92,36 @@ def load_references(systems=['mwz22']): #, 'damd', 'uniconv', 'hdsa', 'lava', 'a
         with open(os.path.join(dir_path, "data", "references", f"{system}.json")) as f:
             references[system] = json.load(f)
     if 'mwz22' in systems:
-        references['mwz22'] = load_multiwoz22_reference()
+        references['mwz22'] = load_multiwoz22_reference(enable_normalization=enable_normalization)
     return references
 
 
-def load_multiwoz22_reference():
+def load_multiwoz22_reference(enable_normalization: bool = True):
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    data_path = os.path.join(dir_path, "data", "references", "mwz22.json")
+    data_path = os.path.join(dir_path, "data", "references", "mwz22.json" if enable_normalization else "mwz22_not_normalized.json")
     if os.path.exists(data_path):
         with open(data_path) as f:
             return json.load(f)
-    references, _ = load_multiwoz22()
+    references, _ = load_multiwoz22(enable_normalization=enable_normalization)
     return references
 
 
-def load_gold_states(mwz_version: Literal['22', '24'] = '22'):
+def load_gold_states(mwz_version: Literal['22', '24'] = '22', enable_normalization: bool = True):
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    data_path = os.path.join(dir_path, "data", "gold_states.json")
+    data_path = os.path.join(dir_path, "data", f"gold_states{mwz_version}.json" if enable_normalization else f"gold_states{mwz_version}_not_normalized.json")
     if os.path.exists(data_path):
         with open(data_path) as f:
             return json.load(f)
     if mwz_version == "22":
-        _, states = load_multiwoz22()
+        _, states = load_multiwoz22(enable_normalization=enable_normalization)
     elif mwz_version == "24":
-        _, states = load_multiwoz24()
+        _, states = load_multiwoz24(enable_normalization=enable_normalization)
     else:
         raise ValueError("Unsupported MultiWOZ version.")
     return states
 
     
-def load_multiwoz22():
+def load_multiwoz22(enable_normalization: bool = True):
 
     def delexicalize_utterance(utterance, span_info):
         span_info.sort(key=(lambda  x: x[-2])) # sort spans by start index
@@ -183,7 +183,8 @@ def load_multiwoz22():
             })           
         mwz22_data[dialog["dialogue_id"].split('.')[0].lower()] = parsed_turns
 
-    normalize_data(mwz22_data)
+    if enable_normalization:
+        normalize_data(mwz22_data)
     
     references, states = {}, {}
     for dialog in mwz22_data:
@@ -191,8 +192,8 @@ def load_multiwoz22():
         states[dialog] = [x["state"] for x  in mwz22_data[dialog]]
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    reference_path = os.path.join(dir_path, "data", "references", "mwz22.json")
-    state_path = os.path.join(dir_path, "data", "gold_states.json")
+    reference_path = os.path.join(dir_path, "data", "references", "mwz22.json" if enable_normalization else "mwz22_not_normalized.json")
+    state_path = os.path.join(dir_path, "data", "gold_states22.json" if enable_normalization else "gold_states22_not_normalized.json")
 
     with open(reference_path, 'w+') as f:
         json.dump(references, f, indent=2)
@@ -203,9 +204,12 @@ def load_multiwoz22():
     return references, states
 
 
-def load_multiwoz24():
+def load_multiwoz24(enable_normalization: bool = True):
     def is_filled(slot_value: str) -> bool:
-        """Whether a slot value is filled."""
+        """Whether a slot value is filled.
+
+        Unfilled slots should be dropped, as in MultiWOZ 2.2.
+        """
         slot_value = slot_value.lower()
         return slot_value and slot_value != "not mentioned" and slot_value != "none"
 
@@ -250,7 +254,8 @@ def load_multiwoz24():
                     for item_dict in v:
                         new_states = {
                             (f"book{slot_name}" if prepend_book else slot_name): slot_val
-                            for slot_name, slot_val in item_dict.items()                        }
+                            for slot_name, slot_val in item_dict.items()
+                        }
                         domain_dial_state.update(new_states)
                 if isinstance(v, str) and v:
                     slot_name = f"book{k}" if prepend_book else k
@@ -287,7 +292,8 @@ def load_multiwoz24():
             parsed_turns.append({"response": "", "state": state})
         mwz24_data[dialogue_id.split(".")[0].lower()] = parsed_turns
 
-    normalize_data(mwz24_data)
+    if enable_normalization:
+        normalize_data(mwz24_data)
 
     references, states = {}, {}
     for dialog in mwz24_data:
@@ -295,8 +301,8 @@ def load_multiwoz24():
         states[dialog] = [x["state"] for x in mwz24_data[dialog]]
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    #  reference_path = os.path.join(dir_path, "data", "references", "mwz24.json")
-    state_path = os.path.join(dir_path, "data", "gold_states.json")
+    #  reference_path = os.path.join(dir_path, "data", "references", "mwz24.json" if enable_normalization else "mwz24_not_normalized.json")
+    state_path = os.path.join(dir_path, "data", "gold_states24.json" if enable_normalization else "gold_states24_not_normalized.json")
 
     #  with open(reference_path, 'w+') as f:
         #  json.dump(references, f, indent=2)
