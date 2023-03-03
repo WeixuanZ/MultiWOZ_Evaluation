@@ -1,7 +1,7 @@
 import sys
 import math
 
-from collections import Counter
+from collections import Counter, defaultdict
 from sacrebleu import corpus_bleu
 from lexical_diversity import lex_div as ld
 from fuzzywuzzy import fuzz
@@ -46,16 +46,24 @@ class Evaluator:
         if dst:
             self.gold_states = load_gold_states(mwz_version=self._MWZ_VERSION, enable_normalization=self._enable_normalization) 
 
-    def evaluate(self, input_data):
+    def evaluate(self, input_data: dict, include_loocv_metrics: bool = False):
+        """
+
+        Args:
+            input_data (dict):
+            include_loocv_metrics (bool, optional): Whether to include the leave-one-out cross validation metrics,
+                currently only supporting DST evaluation. Defaults to False.
+        """
         if self._enable_normalization:
             normalize_data(input_data)
+
         return {
             "bleu"     : get_bleu(input_data, self.reference_dialogs)                             if self.bleu else None,
             "success"  : get_success(input_data, self.database, self.goals, self.booked_domains)  if self.success else None,
             "richness" : get_richness(input_data)                                                 if self.richness else None,
-            "dst"      : get_dst(input_data, self.gold_states)                                    if self.dst else None,
+            "dst"      : get_dst(input_data, self.gold_states, include_loocv_metrics)               if self.dst else None,
         }
-    
+
 
 class Multiwoz24Evaluator(Evaluator):
     _MWZ_VERSION = '24'
@@ -277,8 +285,45 @@ def get_dialog_success(goal, booked_domains, utterances, states, domain_estimate
     return match, success
 
 
-def get_dst(input_data, reference_states, fuzzy_ratio=95):
-    """ Get dialog state tracking results: joint accuracy (exact state match), slot F1, precision and recall """
+def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_ratio=95):
+    """ Get dialog state tracking results: joint accuracy (exact state match), slot F1, precision and recall
+
+    Note that for each dialogue, the number of turns in the input data should match the reference.
+    This means when doing leave-one-out cross-valiation, the model should be decoded on the full test set.
+    """
+    DOMAINS = {"hotel", "train", "restaurant", "attraction", "taxi"}
+
+    def block_domains(input_states: dict, reference_states: dict, blocked_domains: set[str]) -> dict:
+        """Return new input and reference state dictionaries with the specified domains removed.
+
+        Turns with slots from only the blocked domains are removed entirely, otherwise, the slots from the blocked
+        domains are removed from the turn.
+        """
+        new_input_states = defaultdict(list)
+        new_ref_states = defaultdict(list)
+        for dial_id, turns in input_states.items():
+            for turn, turn_ref in zip(turns, reference_states[dial_id]):
+                # drop the blocked slots from the reference state
+                new_turn_ref = {}
+                for domain, slot_values in turn_ref.items():
+                    if domain not in blocked_domains:
+                        new_turn_ref[domain] = slot_values
+
+                # if the reference state does not contain any unblocked slot,
+                # drop the turn entirely from both input and reference states
+                if len(new_turn_ref) == 0:
+                    continue
+                new_ref_states[dial_id].append(new_turn_ref)
+
+                # drop the blocked slots from the input state
+                new_turn = {}
+                for domain, slot_values in turn.items():
+                    if domain not in blocked_domains:
+                        new_turn[domain] = slot_values
+                # inlcude input state even if it does not contain any unblocked slot,
+                # which happens when the model wrongly omits slots
+                new_input_states[dial_id].append(new_turn)
+        return new_input_states, new_ref_states
     
     def flatten(state_dict):
         constraints = {}
@@ -313,18 +358,14 @@ def get_dst(input_data, reference_states, fuzzy_ratio=95):
                 fn += 1
         return tp, fp, fn
 
-    joint_match, slot_acc, slot_f1, slot_p, slot_r = 0, 0, 0, 0, 0
-
-    if not has_state_predictions(input_data):
-        sys.stderr.write('error: Missing state predictions!\n')
-
-    else:
+    def compute_dst_metrics(input_states, reference_states):
+        joint_match, slot_acc, slot_f1, slot_p, slot_r = 0, 0, 0, 0, 0
         total_tp, total_fp, total_fn = 0, 0, 0
         num_turns = 0
-        for dialog_id in input_data:
-            for i, turn in enumerate(input_data[dialog_id]):
+        for dialog_id in input_states:
+            for i, turn in enumerate(input_states[dialog_id]):
                 ref = flatten(reference_states[dialog_id][i])
-                hyp = flatten(turn['state'])
+                hyp = flatten(turn)
 
                 if is_matching(hyp, ref):
                     joint_match += 1
@@ -341,9 +382,35 @@ def get_dst(input_data, reference_states, fuzzy_ratio=95):
         slot_f1 = 2 * slot_p * slot_r / (slot_p + slot_r + 1e-10) * 100
         joint_match = joint_match / (num_turns + 1e-10) * 100
 
-    return {
-        'joint_accuracy'   : joint_match,
-        'slot_f1'          : slot_f1,
-        'slot_precision'   : slot_p,
-        'slot_recall'      : slot_r
-    }
+        return {
+            'joint_accuracy'   : joint_match,
+            'slot_f1'          : slot_f1,
+            'slot_precision'   : slot_p,
+            'slot_recall'      : slot_r
+        }
+
+    if not has_state_predictions(input_data):
+        sys.stderr.write('error: Missing state predictions!\n')
+        return
+
+    input_states = defaultdict(list)
+    for dial_id, turn_infos in input_data.items():
+        for turn_info in turn_infos:
+            input_states[dial_id].append(turn_info["state"])
+    metrics = compute_dst_metrics(input_states, reference_states)
+
+    if include_loocv_metrics:
+        for left_out_domain in DOMAINS:
+            metrics.update({
+                f"only_{left_out_domain}": compute_dst_metrics(
+                    *block_domains(input_states, reference_states, DOMAINS - {left_out_domain})
+                )
+            })
+        for blocked_domain in DOMAINS:
+            metrics.update({
+                f"except_{blocked_domain}": compute_dst_metrics(
+                    *block_domains(input_states, reference_states, set([blocked_domain]))
+                )
+            })
+
+    return metrics
