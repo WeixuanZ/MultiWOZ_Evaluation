@@ -205,13 +205,17 @@ def load_multiwoz22(enable_normalization: bool = True):
 
 
 def load_multiwoz24(enable_normalization: bool = True):
-    def is_filled(slot_value: str) -> bool:
+    def is_filled(slot_value: str, consider_none_as_filled: bool = False) -> bool:
         """Whether a slot value is filled.
 
         Unfilled slots should be dropped, as in MultiWOZ 2.2.
+
+        Args:
+            slot_value: the value to check
+            consider_none_as_filled: whether slots with value "none" should be considered as filled
         """
         slot_value = slot_value.lower()
-        return slot_value and slot_value != "not mentioned" and slot_value != "none"
+        return slot_value and slot_value != "not mentioned" and (slot_value != "none" or consider_none_as_filled)
 
     def get_first_value(values: str) -> str:
         """Get the first value if the values string contains multiple."""

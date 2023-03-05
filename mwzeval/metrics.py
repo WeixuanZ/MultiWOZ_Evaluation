@@ -293,11 +293,11 @@ def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_rat
     """
     DOMAINS = {"hotel", "train", "restaurant", "attraction", "taxi"}
 
-    def block_domains(input_states: dict, reference_states: dict, blocked_domains: set[str]) -> dict:
+    def block_domains(input_states: dict, reference_states: dict, included_domains: set[str]) -> dict:
         """Return new input and reference state dictionaries with the specified domains removed.
 
-        Turns with slots from only the blocked domains are removed entirely, otherwise, the slots from the blocked
-        domains are removed from the turn.
+        Turns with no slots from the included domains are removed entirely, otherwise, only the slots from the included
+        domains are included in the turn (i.e. the blocked slots will be dropped).
         """
         new_input_states = defaultdict(list)
         new_ref_states = defaultdict(list)
@@ -306,10 +306,10 @@ def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_rat
                 # drop the blocked slots from the reference state
                 new_turn_ref = {}
                 for domain, slot_values in turn_ref.items():
-                    if domain not in blocked_domains:
+                    if domain in included_domains:
                         new_turn_ref[domain] = slot_values
 
-                # if the reference state does not contain any unblocked slot,
+                # if the reference state does not contain any slot from the included domain,
                 # drop the turn entirely from both input and reference states
                 if len(new_turn_ref) == 0:
                     continue
@@ -318,9 +318,9 @@ def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_rat
                 # drop the blocked slots from the input state
                 new_turn = {}
                 for domain, slot_values in turn.items():
-                    if domain not in blocked_domains:
+                    if domain in included_domains:
                         new_turn[domain] = slot_values
-                # inlcude input state even if it does not contain any unblocked slot,
+                # inlcude input state even if it does not contain any slot from the included domain,
                 # which happens when the model wrongly omits slots
                 new_input_states[dial_id].append(new_turn)
         return new_input_states, new_ref_states
@@ -403,13 +403,13 @@ def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_rat
         for left_out_domain in DOMAINS:
             metrics.update({
                 f"only_{left_out_domain}": compute_dst_metrics(
-                    *block_domains(input_states, reference_states, DOMAINS - {left_out_domain})
+                    *block_domains(input_states, reference_states, {left_out_domain})
                 )
             })
         for blocked_domain in DOMAINS:
             metrics.update({
                 f"except_{blocked_domain}": compute_dst_metrics(
-                    *block_domains(input_states, reference_states, set([blocked_domain]))
+                    *block_domains(input_states, reference_states, DOMAINS - {blocked_domain})
                 )
             })
 
