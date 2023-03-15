@@ -286,23 +286,47 @@ def get_dialog_success(goal, booked_domains, utterances, states, domain_estimate
 
 
 def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_ratio=95):
-    """ Get dialog state tracking results: joint accuracy (exact state match), slot F1, precision and recall
+    """Get dialog state tracking results: joint accuracy (exact state match), slot F1, precision and recall.
+
+    The input data should have the following format
+    {
+        "xxx0000" : [
+            {
+                "state": {
+                    $domain : {
+                        $slot_name: $slot_value
+                    }, ...
+                },
+                ...
+            }, ...
+        ], ...
+    }
 
     Note that for each dialogue, the number of turns in the input data should match the reference.
     This means when doing leave-one-out cross-valiation, the model should be decoded on the full test set.
     """
     DOMAINS = {"hotel", "train", "restaurant", "attraction", "taxi"}
 
-    def block_domains(input_states: dict, reference_states: dict, included_domains: set[str]) -> dict:
-        """Return new input and reference state dictionaries with the specified domains removed.
+    def filter_inputs_and_references(input_states: dict, reference_states: dict, included_domains: set[str]) -> dict:
+        """Filter input and reference states to only include states from included_domains.
 
-        Turns with no slots from the included domains are removed entirely, otherwise, only the slots from the included
-        domains are included in the turn (i.e. the blocked slots will be dropped).
+        This is useful for evaluating in the leave-one-out setup where the joint goal accuracy should be computed
+        i) jointly with respect to the "left out" (aka unseen) domain and
+        ii) jointly with respect to all other domains.
+
+        Turns whose references do not contain any slots from included_domains are dropped.
         """
         new_input_states = defaultdict(list)
         new_ref_states = defaultdict(list)
-        for dial_id, turns in input_states.items():
-            for turn, turn_ref in zip(turns, reference_states[dial_id]):
+        for dial_id, turn_hyps in input_states.items():
+            turn_refs = reference_states[dial_id]
+            if len(turn_hyps) != len(turn_refs):
+                sys.stderr.write(
+                    f"error: {dial_id} has {len(turn_hyps)} hypothesis (input) turns,"
+                    f" but the reference contains {len(turn_refs)} turns.\n"
+                )
+
+            for turn_hyp, turn_ref in zip(turn_hyps, turn_refs):
                 # drop the blocked slots from the reference state
                 new_turn_ref = {}
                 for domain, slot_values in turn_ref.items():
@@ -316,14 +340,17 @@ def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_rat
                 new_ref_states[dial_id].append(new_turn_ref)
 
                 # drop the blocked slots from the input state
-                new_turn = {}
-                for domain, slot_values in turn.items():
+                new_turn_hyp = {}
+                for domain, slot_values in turn_hyp.items():
                     if domain in included_domains:
-                        new_turn[domain] = slot_values
-                # inlcude input state even if it does not contain any slot from the included domain,
+                        new_turn_hyp[domain] = slot_values
+                # inlcude input state even if it does not contain any unblocked slot,
                 # which happens when the model wrongly omits slots
-                new_input_states[dial_id].append(new_turn)
-        return new_input_states, new_ref_states
+                new_input_states[dial_id].append(new_turn_hyp)
+
+            assert len(new_input_states[dial_id]) == len(new_ref_states[dial_id])
+
+        return dict(new_input_states), dict(new_ref_states)
     
     def flatten(state_dict):
         constraints = {}
@@ -363,8 +390,16 @@ def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_rat
         total_tp, total_fp, total_fn = 0, 0, 0
         num_turns = 0
         for dialog_id in input_states:
-            for i, turn in enumerate(input_states[dialog_id]):
-                ref = flatten(reference_states[dialog_id][i])
+            hyps = input_states[dialog_id]
+            refs = reference_states[dialog_id]
+            if len(hyps) != len(refs):
+                sys.stderr.write(
+                    f"warning: {dialog_id} has {len(hyps)} hypothesis (input) turns,"
+                    f" but the reference contains {len(refs)} turns."
+                    " If this is intented, please make sure that turns are dropped from the end of the dialogue.\n"
+                )
+            for i, turn in enumerate(hyps):
+                ref = flatten(refs[i])
                 hyp = flatten(turn)
 
                 if is_matching(hyp, ref):
@@ -397,19 +432,20 @@ def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_rat
     for dial_id, turn_infos in input_data.items():
         for turn_info in turn_infos:
             input_states[dial_id].append(turn_info["state"])
+    input_states = dict(input_states)
     metrics = compute_dst_metrics(input_states, reference_states)
 
     if include_loocv_metrics:
         for left_out_domain in DOMAINS:
             metrics.update({
                 f"only_{left_out_domain}": compute_dst_metrics(
-                    *block_domains(input_states, reference_states, {left_out_domain})
+                    *filter_inputs_and_references(input_states, reference_states, {left_out_domain})
                 )
             })
         for blocked_domain in DOMAINS:
             metrics.update({
                 f"except_{blocked_domain}": compute_dst_metrics(
-                    *block_domains(input_states, reference_states, DOMAINS - {blocked_domain})
+                    *filter_inputs_and_references(input_states, reference_states, DOMAINS - {blocked_domain})
                 )
             })
 
