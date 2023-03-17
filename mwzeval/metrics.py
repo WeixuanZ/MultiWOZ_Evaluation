@@ -333,10 +333,19 @@ def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_rat
                     if domain in included_domains:
                         new_turn_ref[domain] = slot_values
 
-                # if the reference state does not contain any slot from the included domain,
-                # drop the turn entirely from both input and reference states
-                if len(new_turn_ref) == 0:
+                # for a given turn, if its reference state does not contain any
+                # slot from the included domains, and the turn is not the first
+                # turn of a series of turns involving the included domain (when
+                # the dialogue initiates or domain switching occurs, and no state
+                # has been mentioned, drop the turn entirely from both input and
+                # reference states and clear states of previous turns from the
+                # same dialogue
+                if len(new_turn_ref) == 0 and len(turn_ref) != 0:
+                    if len(new_ref_states[dial_id]) > 0:
+                        new_ref_states[dial_id] = []
+                        new_input_states[dial_id] = []
                     continue
+
                 new_ref_states[dial_id].append(new_turn_ref)
 
                 # drop the blocked slots from the input state
@@ -349,6 +358,9 @@ def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_rat
                 new_input_states[dial_id].append(new_turn_hyp)
 
             assert len(new_input_states[dial_id]) == len(new_ref_states[dial_id])
+            if all(map(lambda turn: len(turn) == 0, new_ref_states[dial_id])):
+                new_input_states[dial_id] = []
+                new_ref_states[dial_id] = []
 
         return dict(new_input_states), dict(new_ref_states)
     
