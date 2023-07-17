@@ -341,7 +341,7 @@ def get_dst(input_data, reference_states, include_loocv_metrics=False, fuzzy_rat
                 # reference states and clear states of previous turns from the
                 # same dialogue
                 if len(new_turn_ref) == 0 and len(turn_ref) != 0:
-                    if len(new_ref_states[dial_id]) > 0:
+                    if len(new_ref_states[dial_id]) > 0 and all(map(lambda x: len(x) == 0, new_ref_states[dial_id])):
                         new_ref_states[dial_id] = []
                         new_input_states[dial_id] = []
                     continue
